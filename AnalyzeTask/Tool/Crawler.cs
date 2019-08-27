@@ -19,6 +19,7 @@ namespace AnalyzeTask.Tool
         public int wait = 0;
         public int Timeout = 30000;
         public string encod = "GB2312";
+        public int Retry = 3;
         private Queue<QueueModel> queue = new Queue<QueueModel>();
         private List<Task> tasks = new List<Task>();
         private bool TreadBreak = false;
@@ -139,6 +140,11 @@ namespace AnalyzeTask.Tool
             }
             catch (Exception e)
             {
+                if (Retry > 0)
+                {
+                    Retry--;
+                    return GetHmltContent(Url);
+                }
                 log.Error($"错误URL：{Url}", e);
             }
             return strResult;
