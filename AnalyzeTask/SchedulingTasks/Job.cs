@@ -26,7 +26,10 @@ namespace AnalyzeTask.SchedulingTasks
                 //需要寻找的class
                 string[] NeedClass = new string[] { ".provincetr", ".citytr", ".countytr", ".towntr", ".villagetr" };
                 Crawler crawler = new Crawler();
-                crawler.wait = 3000;
+                crawler.wait = 2000;
+                crawler.Timeout = 10000;
+                //crawler.Cookie = "__utmz=207252561.1566065018.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); AD_RS_COOKIE=20082856; __utma=207252561.1090452968.1566065018.1566892516.1566911665.4; __utmc=207252561; __utmt=1; wzws_reurl=L3Rqc2ovdGpiei90anlxaGRtaGN4aGZkbS8yMDE4LzEzLmh0bWw=; __utmb=207252561.2.10.1566911665; wzws_cid=71a25ce145fef3ef24abcd820a9cb0a7362be1e734c83a66d1489e6dd05749fe7d46940c76eda51782a874be4358594674e0ffc98ea6cd85dbd9af045cc53d1d2f71135cff0df7fdf0e26a219f19ffc6";
+                crawler.ThreadNum = 5;
                 crawler.DoSomeThing((n, que) =>
                 {
                     Qfun q = HtmlParser.Query(n);
@@ -34,12 +37,13 @@ namespace AnalyzeTask.SchedulingTasks
                     {
                         for (int i = 0; i < NeedClass.Length; i++)
                         {
-                            var td = q(NeedClass[i]);
-                            if (td.length == 2)
+                            var Class = q(NeedClass[i]);
+                            foreach (var items in Class)
                             {
-                                foreach (var item in td)
+                                var td = q(items).find("td");
+                                if (td.length == 2 || td.length == 1)
                                 {
-                                    var a = q(item).find("a");
+                                    var a = q(td).find("a");
                                     if (a.length > 0)
                                     {
                                         RegionalModel regional = new RegionalModel();
@@ -70,37 +74,37 @@ namespace AnalyzeTask.SchedulingTasks
                                         CreateSQLCommand(regional);
                                     }
                                 }
-                            }
-                            else if (td.length == 3)
-                            {
-                                RegionalModel regional = new RegionalModel();
-                                regional.RegionalDataOID = Guid.NewGuid();
-                                regional.ID = td[0].textContent;
-                                regional.Name = td[2].textContent;
-                                regional.ParentOID = Guid.Parse(que.pairs.FirstOrDefault(f => f.Key == "ParentOID").Value);
-                                CreateSQLCommand(regional);
-                            }
-                            else
-                            {
-                                foreach (var item in td)
+                                else if (td.length == 3)
                                 {
-                                    var a = q(item).find("a");
-                                    foreach (var href in a)
+                                    RegionalModel regional = new RegionalModel();
+                                    regional.RegionalDataOID = Guid.NewGuid();
+                                    regional.ID = td[0].textContent;
+                                    regional.Name = td[2].textContent;
+                                    regional.ParentOID = Guid.Parse(que.pairs.FirstOrDefault(f => f.Key == "ParentOID").Value);
+                                    CreateSQLCommand(regional);
+                                }
+                                else
+                                {
+                                    foreach (var item in td)
                                     {
-                                        RegionalModel regional = new RegionalModel();
-                                        regional.RegionalDataOID = Guid.NewGuid();
-                                        regional.Name = href.textContent;
-                                        regional.ParentOID = Guid.Parse(que.pairs.FirstOrDefault(f => f.Key == "ParentOID").Value);
-                                        string Url = href.getAttribute("href");
-                                        regional.ID = Url.Substring(0, Url.Length - 5);
-                                        crawler.EnQueue(CreateQueue(Url, regional.RegionalDataOID.ToString()));
-                                        CreateSQLCommand(regional);
+                                        var a = q(item).find("a");
+                                        foreach (var href in a)
+                                        {
+                                            RegionalModel regional = new RegionalModel();
+                                            regional.RegionalDataOID = Guid.NewGuid();
+                                            regional.Name = href.textContent;
+                                            regional.ParentOID = Guid.Parse(que.pairs.FirstOrDefault(f => f.Key == "ParentOID").Value);
+                                            string Url = href.getAttribute("href");
+                                            regional.ID = Url.Substring(0, Url.Length - 5);
+                                            crawler.EnQueue(CreateQueue(Url, regional.RegionalDataOID.ToString()));
+                                            CreateSQLCommand(regional);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                });
+                }, () => { InsertIntoMSDB(); crawler.Done(); });
                 crawler.EnQueue(BeginTask());
                 crawler.RunCrawler();
                 base.NextTime(context);
@@ -125,14 +129,14 @@ namespace AnalyzeTask.SchedulingTasks
             {
                 Dictionary<string, string> keys = new Dictionary<string, string>();
                 keys.Add("ParentOID", Guid.Empty.ToString());
-                QueueModel queue = new QueueModel { Url = BaseUrl + Url, pairs = keys };
+                QueueModel queue = new QueueModel { Url = BaseUrl + Url, pairs = keys, Retry = 5 };
                 return queue;
             }
             else
             {
                 Dictionary<string, string> keys = new Dictionary<string, string>();
                 keys.Add("ParentOID", ParentOID);
-                QueueModel queue = new QueueModel { Url = BaseUrl + Url, pairs = keys };
+                QueueModel queue = new QueueModel { Url = BaseUrl + Url, pairs = keys, Retry = 5 };
                 return queue;
             }
         }
@@ -146,9 +150,10 @@ namespace AnalyzeTask.SchedulingTasks
         {
             if (regional != null)
             {
-                string sql = $"INSERT INTO RegionalData (RegionalDataOID,ID,Name,ParentOID) VALUES({regional.RegionalDataOID},'{regional.ID}','{regional.Name}',{regional.ParentOID})";
+                string sql = $"INSERT INTO RegionalData (RegionalDataOID,ID,Name,ParentOID) VALUES('{regional.RegionalDataOID}','{regional.ID}','{regional.Name}','{regional.ParentOID}')";
                 log.Information(sql);
                 collection.Add(new Command(sql, regional));
+                dbContext.ExecuteSql(sql, regional);
             }
         }
 

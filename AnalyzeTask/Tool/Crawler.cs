@@ -19,10 +19,11 @@ namespace AnalyzeTask.Tool
         public int wait = 0;
         public int Timeout = 30000;
         public string encod = "GB2312";
-        public int Retry = 3;
+        public string Cookie = string.Empty;
         private Queue<QueueModel> queue = new Queue<QueueModel>();
         private List<Task> tasks = new List<Task>();
         private bool TreadBreak = false;
+        private Dictionary<string, int> RetryList = new Dictionary<string, int>();
         public Crawler()
         {
 
@@ -71,7 +72,7 @@ namespace AnalyzeTask.Tool
         /// 给任务下达具体命令
         /// </summary>
         /// <param name="action"></param>
-        public void DoSomeThing(Action<string, QueueModel> action)
+        public void DoSomeThing(Action<string, QueueModel> action, Action CalllBack)
         {
             TasksFac(() =>
             {
@@ -86,12 +87,13 @@ namespace AnalyzeTask.Tool
                                 break;
                             }
                             QueueModel model = queue.Dequeue();
-                            string Html = GetWebContent(model.Url);
+                            string Html = GetWebContent(model);
                             action(Html, model);
                         }
                         else
                         {
                             TreadBreak = true;
+                            CalllBack();
                         }
                         log.Error(this.GetQueueCount().ToString());
                     }
@@ -108,30 +110,31 @@ namespace AnalyzeTask.Tool
         }
 
         //根据Url地址得到网页的html源码 
-        public string GetWebContent(string Url)
+        public string GetWebContent(QueueModel model)
         {
             if (wait > 0)
             {
                 lock (obj)
                 {
                     Thread.Sleep(wait);
-                    return GetHmltContent(Url);
+                    return GetHmltContent(model);
                 }
             }
             else
             {
-                return GetHmltContent(Url);
+                return GetHmltContent(model);
             }
         }
 
-        private string GetHmltContent(string Url)
+        private string GetHmltContent(QueueModel model)
         {
             string strResult = "";
             try
             {
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(Url);
-                request.Timeout = 30000;
-                request.Headers.Set("Pragma", "no-cache");
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(model.Url);
+                request.Timeout = this.Timeout;
+                request.Headers.Add("Pragma", "no-cache");
+                request.Headers.Add("Cookie", Cookie);
                 HttpWebResponse response = (HttpWebResponse)request.GetResponse();
                 Stream streamReceive = response.GetResponseStream();
                 Encoding encoding = Encoding.GetEncoding(encod);
@@ -140,12 +143,12 @@ namespace AnalyzeTask.Tool
             }
             catch (Exception e)
             {
-                if (Retry > 0)
+                if (model.Retry > 0)
                 {
-                    Retry--;
-                    return GetHmltContent(Url);
+                    model.Retry = model.Retry - 1;
+                    return GetHmltContent(model);
                 }
-                log.Error($"错误URL：{Url}", e);
+                log.Error($"错误URL：{model.Url}", e);
             }
             return strResult;
         }
@@ -162,8 +165,11 @@ namespace AnalyzeTask.Tool
 
     public class QueueModel
     {
+        public int Retry = 5;
+
         public string Url { get; set; }
 
         public Dictionary<string, string> pairs = new Dictionary<string, string>();
+
     }
 }
